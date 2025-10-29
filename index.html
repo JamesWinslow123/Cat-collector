@@ -49,6 +49,15 @@
              font-size: 0.75rem;
              font-weight: 600;
         }
+        /* Style for secondary buttons */
+        .btn-secondary {
+            background-color: #f0f0f0;
+            color: #4a4a4a;
+            transition: background-color 0.2s;
+        }
+        .btn-secondary:hover {
+            background-color: #e0e0e0;
+        }
     </style>
 </head>
 <body class="min-h-screen flex flex-col">
@@ -58,7 +67,6 @@
             <h1 class="text-3xl font-extrabold text-[#a34e54] flex items-center">
                 <span class="mr-2 text-4xl">🐾</span> Purr-fect Collector
             </h1>
-            <!-- Removed User ID badge as it's not needed for localStorage -->
         </div>
     </header>
 
@@ -74,7 +82,20 @@
                     Collect!
                 </button>
             </div>
-            <p id="error-message" class="text-sm text-red-600 mt-2 hidden"></p>
+            <!-- General message area for errors and import/export feedback -->
+            <p id="message-area" class="text-sm text-red-600 mt-2 hidden"></p>
+
+            <!-- Import/Export Feature Buttons -->
+            <div class="mt-6 pt-4 border-t border-gray-100 flex flex-col sm:flex-row gap-4">
+                <button id="export-button" class="btn-secondary px-4 py-2 rounded-lg font-semibold flex-1">
+                    Export Links (.txt)
+                </button>
+                <button id="import-trigger-button" class="btn-secondary px-4 py-2 rounded-lg font-semibold flex-1">
+                    Import Links (.txt)
+                </button>
+                <input type="file" id="import-file-input" accept=".txt" class="hidden">
+            </div>
+
         </div>
 
         <!-- Image Collection Display -->
@@ -102,35 +123,53 @@
 
     <!-- Local Storage Logic -->
     <script type="module">
-        // Removed all Firebase imports and initialization logic
-
         const catGrid = document.getElementById('image-grid');
         const countSpan = document.getElementById('cat-count');
         const urlInput = document.getElementById('image-url-input');
         const addButton = document.getElementById('add-image-button');
-        const errorMsg = document.getElementById('error-message');
+        const messageArea = document.getElementById('message-area'); // Renamed from error-message
         const loadingSpinner = document.getElementById('loading-spinner');
+        
+        // New elements for Import/Export
+        const exportButton = document.getElementById('export-button');
+        const importTriggerButton = document.getElementById('import-trigger-button');
+        const importFileInput = document.getElementById('import-file-input');
 
         const STORAGE_KEY = 'cat_images_collection';
+
+        /** Clears and hides the message area. */
+        function clearMessage() {
+            messageArea.textContent = '';
+            messageArea.classList.add('hidden');
+            messageArea.classList.remove('text-red-600', 'text-green-600');
+        }
+
+        /** Displays a success or error message. */
+        function displayMessage(text, isError = false) {
+            clearMessage();
+            messageArea.textContent = text;
+            messageArea.classList.remove('hidden');
+            messageArea.classList.add(isError ? 'text-red-600' : 'text-green-600');
+        }
 
         /**
          * Loads the cat images array from local storage.
          * @returns {Array} Array of cat objects.
          */
         function loadImages() {
+            clearMessage();
             try {
                 const stored = localStorage.getItem(STORAGE_KEY);
-                // Parse the stored JSON, or return an empty array if nothing is stored
                 const cats = stored ? JSON.parse(stored) : [];
 
-                // Ensure a timestamp is present for sorting (even if it's just the current time)
                 return cats.map(cat => ({
                     ...cat,
                     timestamp: cat.timestamp || new Date().toISOString()
                 }));
             } catch (e) {
                 console.error("Error loading from localStorage:", e);
-                return []; // Return empty array on parse error
+                displayMessage("Error loading your collection. Your storage might be corrupted.", true);
+                return [];
             }
         }
 
@@ -140,13 +179,12 @@
          */
         function saveImages(cats) {
             try {
-                // Stringify the array before saving
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(cats));
+                return true;
             } catch (e) {
                 console.error("Error saving to localStorage:", e);
-                // Inform the user if storage limit is hit
-                errorMsg.textContent = "Could not save image (local storage may be full).";
-                errorMsg.classList.remove('hidden');
+                displayMessage("Could not save collection (local storage may be full).", true);
+                return false;
             }
         }
 
@@ -155,11 +193,10 @@
          */
         addButton.addEventListener('click', () => {
             const url = urlInput.value.trim();
-            errorMsg.classList.add('hidden');
+            clearMessage();
 
             if (!url) {
-                errorMsg.textContent = "Please enter a valid URL.";
-                errorMsg.classList.remove('hidden');
+                displayMessage("Please enter a valid URL.", true);
                 return;
             }
 
@@ -178,26 +215,130 @@
                 };
 
                 cats.push(newCat);
-                saveImages(cats);
-
-                urlInput.value = ''; // Clear input on success
-                console.log("Image URL added successfully:", url);
-
-                // Re-render the grid with the new data
-                renderImages(cats);
+                if (saveImages(cats)) {
+                    urlInput.value = ''; // Clear input on success
+                    console.log("Image URL added successfully:", url);
+                    renderImages(cats);
+                }
 
             } catch (e) {
                 console.error("Error adding cat image: ", e);
-                errorMsg.textContent = `Error processing image: ${e.message}`;
-                errorMsg.classList.remove('hidden');
+                displayMessage(`Error processing image: ${e.message}`, true);
             } finally {
                 addButton.textContent = originalButtonText;
                 addButton.disabled = false;
             }
         });
 
+
         /**
-         * 2. Rendering Logic
+         * 2. Export Feature
+         */
+        function exportToTxt() {
+            clearMessage();
+            const cats = loadImages();
+            if (cats.length === 0) {
+                displayMessage("Nothing to export! Your collection is empty.", true);
+                return;
+            }
+
+            // Extract just the URLs, one per line
+            const urlList = cats.map(cat => cat.url).join('\n');
+            
+            // Create a Blob with the text content
+            const blob = new Blob([urlList], { type: 'text/plain;charset=utf-8' });
+            
+            // Create a temporary link element to trigger the download
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = 'cat_images_collection.txt';
+            
+            // Append to body, click, and remove
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            displayMessage(`Exported ${cats.length} links to cat_images_collection.txt!`);
+        }
+        
+        exportButton.addEventListener('click', exportToTxt);
+
+
+        /**
+         * 3. Import Feature
+         */
+        function importFromTxt(event) {
+            clearMessage();
+            const file = event.target.files[0];
+            if (!file) {
+                // User closed the file dialog without selecting a file
+                return;
+            }
+
+            const reader = new FileReader();
+            
+            reader.onload = (e) => {
+                try {
+                    const text = e.target.result;
+                    // Split content by newline and filter out empty or whitespace-only lines
+                    const newUrls = text.split('\n')
+                                        .map(line => line.trim())
+                                        .filter(line => line.length > 0);
+
+                    if (newUrls.length === 0) {
+                        displayMessage("The imported file was empty or contained no valid links.", true);
+                        return;
+                    }
+
+                    let existingCats = loadImages();
+                    let importedCount = 0;
+                    
+                    newUrls.forEach(url => {
+                        // Simple check to prevent duplicates based on URL
+                        const isDuplicate = existingCats.some(cat => cat.url === url);
+                        
+                        if (!isDuplicate) {
+                            const newCat = {
+                                id: `${Date.now()}-${Math.floor(Math.random() * 1000)}`, 
+                                url: url,
+                                timestamp: new Date().toISOString()
+                            };
+                            existingCats.push(newCat);
+                            importedCount++;
+                        }
+                    });
+
+                    if (saveImages(existingCats)) {
+                         renderImages(existingCats);
+                         displayMessage(`Successfully imported ${importedCount} new links! Total: ${existingCats.length}`);
+                    }
+
+                } catch (error) {
+                    console.error("Error reading or processing file:", error);
+                    displayMessage("An error occurred during file import.", true);
+                }
+                // Clear the file input value so the same file can be selected again
+                importFileInput.value = ''; 
+            };
+            
+            reader.onerror = () => {
+                displayMessage("Could not read the file.", true);
+                importFileInput.value = '';
+            };
+
+            reader.readAsText(file);
+        }
+        
+        importTriggerButton.addEventListener('click', () => {
+            // Trigger the hidden file input click
+            importFileInput.click();
+        });
+        
+        importFileInput.addEventListener('change', importFromTxt);
+
+
+        /**
+         * 4. Rendering Logic (from previous version, updated for clarity)
          */
         function renderImages(cats) {
             catGrid.innerHTML = '';
